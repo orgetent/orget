@@ -470,13 +470,117 @@ const saleItemP = s => `<div class="it" data-a="openS" data-id="${s.id}"><div>${
 /* ---------- হিসাব / কাস্টমার ---------- */
 const pdList = () => { const L = D.c.map(c => ({ c, i: dueInfo(c) })).filter(x => x.i && cdue(x.c.id) > 0).sort((a, b) => a.i.d > b.i.d ? 1 : a.i.d < b.i.d ? -1 : 0), ym = ymOf(today());
   return `<h2>পরিশোধের তারিখ অনুযায়ী (${L.length})</h2>` + (L.map(({ c, i }) => { const r = rel(i.d), im = photoOf(c.id), got = monthPaid(c.id, ym), tv = tgtFor(c, ym), tg = tv > 0 && canAct() ? ' · টার্গেট ' + tk(tv) + (got ? ' (আদায় ' + tk(got) + ')' : '') : ''; return `<div class="it" data-a="openC" data-id="${c.id}"><div class="pf">${im ? `<img src="${im}" alt="">` : ''}<div>${esc(c.name)}<br><small>লোন ${esc(c.loan)} · ${dt(i.d)}${i.special ? ' (আলাদা তারিখ, ' + bnN((c.dl || []).filter(x => x.m == i.ym && x.d).length) + ' বার বদলেছে)' : ''}${tg}</small></div></div><div><b>${tk(cdue(c.id))}</b><br><small class="${r[0]}">${r[1]}</small></div></div>`; }).join('') || empty('কারও পরিশোধের তারিখ দেওয়া নেই।')); };
+/* ---------- তাগাদা / ডিফল্ট / নতুন কাস্টমার / তারিখ অনুযায়ী লক্ষ্য / মাসওয়ারি হিসাব ---------- */
+const DEF_DAYS = 90, DEFTAG = '<span class="tag" style="background:var(--bad);color:#fff">ডিফল্ট</span>';
+const dayN = d => Math.round((new Date(today() + 'T00:00') - new Date(d + 'T00:00')) / 864e5);
+const isoMs = ms => iso(new Date(ms));
+/* এক পাসে প্রতি কাস্টমারের: বাকি, শেষ কিস্তি/জমার তারিখ, প্রথম বাকিওয়ালা বিক্রির তারিখ, প্রথম কেনার তারিখ */
+const custStats = () => {
+  const m = {};
+  D.s.forEach(s => {
+    const o = m[s.cid] || (m[s.cid] = { due: 0, last: '', first: '', fs: '' }), d = due(s); o.due += d;
+    if (s.date && (!o.fs || s.date < o.fs)) o.fs = s.date;
+    if (d > 0 && s.date && (!o.first || s.date < o.first)) o.first = s.date;
+    items(s).forEach(t => { if (t.d && t.l != 'নগদ' && t.l != 'ডাউন পেমেন্ট' && t.d > o.last) o.last = t.d; });
+  });
+  return m;
+};
+const defList = CS => D.c.map(c => { const o = CS[c.id]; if (!o || o.due <= 0) return null; const b = o.last > o.first ? o.last : o.first; if (!b) return null; const n = dayN(b); return n > DEF_DAYS ? { c, due: o.due, n, b, last: o.last, mo: Math.floor(n / 30) } : null; }).filter(Boolean).sort((a, b) => b.n - a.n);
+const dueRows = CS => D.c.map(c => { const o = CS[c.id]; if (!o || o.due <= 0) return null; const i = dueInfo(c); return i ? { c, i, due: o.due } : null; }).filter(Boolean);
+const byD = (a, b) => a.i.d < b.i.d ? -1 : a.i.d > b.i.d ? 1 : 0;
+const tgList = CS => dueRows(CS).filter(x => x.i.d >= today()).sort(byD);
+const odList = CS => dueRows(CS).filter(x => x.i.d < today()).sort(byD);
+const newList = CS => D.c.map(c => ({ c, j: c.at ? isoMs(c.at) : ((CS[c.id] || {}).fs || '') })).sort((a, b) => a.j < b.j ? 1 : a.j > b.j ? -1 : (b.c.loan > a.c.loan ? 1 : -1));
+const cRow = (c, right, sub) => { const im = photoOf(c.id); return `<div class="it" data-a="openC" data-id="${c.id}"><div class="pf">${im ? `<img src="${im}" alt="">` : ph0}<div>${esc(c.name)}<br><small>${sub}</small></div></div><div style="text-align:right">${right}</div></div>`; };
+const tgRow = x => { const r = rel(x.i.d), t = tgtFor(x.c, x.i.ym); return cRow(x.c, `<b>${tk(x.due)}</b><br><small class="${r[0]}">${r[1]}</small>`, `লোন ${esc(x.c.loan)} · ${dt(x.i.d)}${t > 0 ? ' · কিস্তি ' + tk(t) : ''}`); };
+const dfRow = x => cRow(x.c, `<b class="bad">${tk(x.due)}</b><br><small class="bad">${bnN(x.mo)} মাসের বেশি</small>`, `লোন ${esc(x.c.loan)} · ${x.last ? 'শেষ জমা ' + dt(x.last) : 'কখনো কিস্তি দেয়নি'}`);
+const nwRow = x => cRow(x.c, `<small>${x.j ? dt(x.j) : ''}</small>`, `লোন ${esc(x.c.loan)} · ${esc(x.c.phone || '')}`);
+const secL = (title, L, k, fn, emp) => `<h2>${title} (${bnN(L.length)})</h2>` + (L.slice(0, 6).map(fn).join('') || empty(emp)) + (L.length > 6 ? `<div class="bar"><button class="g2" data-a="moreL" data-id="${k}">আরও দেখুন (আরও ${bnN(L.length - 6)} জন)</button></div>` : '');
+const LCFG = { tg: ['তাগাদা', tgList, tgRow, 'আজ বা সামনে কারও কিস্তির তারিখ নেই।'], od: ['কিস্তির ডেট পার হয়েছে', odList, tgRow, 'কারও ডেট পার হয়নি ✓'], df: ['ডিফল্ট (৩ মাসের বেশি কিস্তি দেয়নি)', defList, dfRow, 'কোনো ডিফল্ট কাস্টমার নেই ✓'], nw: ['নতুন কাস্টমার', newList, nwRow, 'কোনো কাস্টমার নেই।'] };
+const listV = k => { const f = LCFG[k]; if (!f) return empty('পাতা পাওয়া যায়নি।'); const L = f[1](custStats()); return `<div class="bar"><button class="g2" data-a="back">← পিছনে</button></div><h2>${f[0]} (${bnN(L.length)})</h2>` + (L.map(f[2]).join('') || empty(f[3])); };
+/* তারিখ অনুযায়ী আসার কথা: কাস্টমারের নিয়মিত (বা সেই মাসে বলা আলাদা) তারিখ ও মাসিক কিস্তির অঙ্ক ধরে */
+const expMonth = (ym, CS) => {
+  const map = {}, cur = ymOf(today());
+  D.c.forEach(c => { const o = CS[c.id]; [prevYm(ym), ym].forEach(m => {
+    const pr = promiseOf(c, m), day = pdayOf(c.pday), sd = pr ? pr.d : (day ? monthDate(m, day) : '');
+    if (!sd || ymOf(sd) != ym) return; if (!(m < cur || (o && o.due > 0))) return;
+    const t = tgtFor(c, m); if (t <= 0 && m < cur) return;
+    (map[sd] = map[sd] || []).push({ c, m, t, p: monthPaid(c.id, m), due: o ? o.due : 0 });
+  }); });
+  return map;
+};
+const sumF = (a, f) => a.reduce((s, x) => s + f(x), 0);
+const expTot = L => { const a = L.filter(x => x.t > 0), T = sumF(a, x => x.t), G = sumF(a, x => Math.min(x.p, x.t)); return { a, T, G, R: T - G }; };
+const expRow = x => cRow(x.c, `<b>${tk(x.t)}</b><br><small class="${x.p >= x.t ? 'ok' : 'bad'}">${x.p >= x.t ? '✓ এসেছে' : 'জমা ' + tk(x.p)}</small>`, `লোন ${esc(x.c.loan)} · মোট বাকি ${tk(x.due)}`);
+const todayBox = CS => { const t = today(), e = expTot((expMonth(ymOf(t), CS)[t]) || []);
+  return `<h2>আজ আসার কথা</h2><div class="g"><div class="k" data-a="goRep"><b>${tk(e.T)}</b>আজ আসার কথা (${bnN(e.a.length)} জন)</div><div class="k" data-a="goRep"><b>${tk(e.G)}</b>এসেছে</div>${e.a.length ? `<div class="k due" data-a="goRep"><b>${tk(e.R)}</b>এখনো বাকি</div>` : ''}</div><p class="mut">চাপলে রিপোর্টে তারিখ ধরে বিস্তারিত দেখা যাবে।</p>`; };
+const dateTgBlock = () => {
+  const CS = custStats(), ym = ymOf(rd), M = expMonth(ym, CS), days = Object.keys(M).sort(), L = M[rd] || [], e = expTot(L), NA = L.filter(x => x.t <= 0), cur = ymOf(today());
+  const rows = days.map(d => { const z = expTot(M[d]); if (!z.a.length) return ''; return `<div class="it" data-a="setRd" data-id="${d}" style="${d == rd ? 'border-color:var(--ac);background:var(--ac2)' : ''}"><div><b>${dt(d)}</b><br><small>${bnN(z.a.length)} জনের কাছ থেকে</small></div><div><b>${tk(z.T)}</b><br><small class="${z.G >= z.T ? 'ok' : ''}">এসেছে ${tk(z.G)}</small></div></div>`; }).join('');
+  const mt = sumF(days, d => expTot(M[d]).T), mg = sumF(days, d => expTot(M[d]).G);
+  const noDate = D.c.filter(c => (CS[c.id] || {}).due > 0 && !pdayOf(c.pday) && !c.pd), noAmt = D.c.filter(c => (CS[c.id] || {}).due > 0 && pdayOf(c.pday) && tgtFor(c, cur) <= 0);
+  const nm = a => a.map(c => `<a data-a="openC" data-id="${c.id}" style="text-decoration:underline;cursor:pointer">${esc(c.name)}</a>`).join(', ');
+  return `<h2>তারিখ অনুযায়ী আসার কথা</h2><p class="mut">কাস্টমারের পরিশোধের তারিখ ও মাসিক কিস্তির অঙ্ক ধরে হিসাব। উপরের তারিখ বদলালে এটাও বদলাবে।</p><h2 style="font-size:16px">${dt(rd)}</h2><div class="g"><div class="k"><b>${tk(e.T)}</b>আসার কথা (${bnN(e.a.length)} জন)</div><div class="k"><b>${tk(e.G)}</b>এসেছে</div><div class="k due"><b>${tk(e.R)}</b>এখনো বাকি</div></div>`
+    + (e.a.length ? e.a.map(expRow).join('') : empty('এই তারিখে কারও আসার কথা নেই।'))
+    + (NA.length ? `<p class="mut">মাসিক কিস্তির অঙ্ক দেওয়া নেই (${bnN(NA.length)} জন): ${nm(NA.map(x => x.c))}</p>` : '')
+    + `<h2 style="font-size:16px">${ymLabel(ym)} — তারিখ ধরে (মোট ${tk(mt)}, এসেছে ${tk(mg)})</h2><p class="mut">তারিখে চাপলে ওই দিনের তালিকা উপরে আসবে।</p>` + (rows || empty('এই মাসে কোনো তারিখ ধরা নেই।'))
+    + (noDate.length ? `<p class="mut"><b>পরিশোধের তারিখ দেওয়া নেই (${bnN(noDate.length)} জন, বাকি আছে):</b> ${nm(noDate)}</p>` : '') + (noAmt.length ? `<p class="mut"><b>তারিখ আছে কিন্তু মাসিক অঙ্ক নেই (${bnN(noAmt.length)} জন):</b> ${nm(noAmt)}</p>` : '');
+};
+const defBlock = () => { const L = defList(custStats()); return `<h2>ডিফল্ট কাস্টমার (${bnN(L.length)})</h2><p class="mut">যাদের বাকি আছে অথচ ${bnN(DEF_DAYS)} দিনের বেশি কোনো কিস্তি বা জমা দেয়নি। (শেষ জমা, না থাকলে বাকির বিক্রির তারিখ থেকে গোনা)</p>` + (L.length ? `<div class="g"><div class="k"><b>${bnN(L.length)} জন</b>ডিফল্ট</div><div class="k due"><b>${tk(sumF(L, x => x.due))}</b>এদের মোট বাকি</div></div>` + L.map(dfRow).join('') : empty('কোনো ডিফল্ট কাস্টমার নেই ✓')); };
+/* মালিকের জন্য: সারা জীবনের ও মাসওয়ারি বিক্রি-কালেকশন */
+const salesMonths = () => {
+  const m = {}, okM = k => /^\d{4}-\d{2}$/.test(k), get = k => m[k] || (m[k] = { m: k, sn: 0, st: 0, sc: 0, cn: 0, ci: 0 });
+  D.s.forEach(s => { const k = ymOf(s.date); if (okM(k)) { const o = get(k); o.sn++; o.st += s.total || 0; if (s.type == 'c') o.sc += s.total || 0; } items(s).forEach(t => { const q = ymOf(t.d); if (!okM(q)) return; const o = get(q); if (t.l == 'নগদ' || t.l == 'ডাউন পেমেন্ট') o.cn += t.a; else o.ci += t.a; }); });
+  const ks = Object.keys(m).sort(); if (!ks.length) return []; const out = []; let k = ks[0], cur = ymOf(today());
+  for (let i = 0; i < 240 && k <= cur; i++, k = nextYm(k)) out.push(m[k] || { m: k, sn: 0, st: 0, sc: 0, cn: 0, ci: 0 });
+  return out.reverse();
+};
+const chg = (v, p) => p > 0 && v != p ? `<small class="${v >= p ? 'ok' : 'bad'}">${v >= p ? '▲' : '▼'} ${bnN(Math.round(Math.abs(v - p) / p * 100))}%</small>` : '';
+const lifeBlock = () => { const ms = salesMonths(), st = sumF(ms, x => x.st), sn = sumF(ms, x => x.sn), cn = sumF(ms, x => x.cn), ci = sumF(ms, x => x.ci), dueT = D.s.reduce((a, s) => a + due(s), 0), CS = custStats();
+  return `<h2>সারা জীবনের হিসাব</h2><div class="g"><div class="k"><b>${tk(st)}</b>মোট বিক্রি (${bnN(sn)} টি)</div><div class="k"><b>${tk(cn + ci)}</b>মোট কালেকশন</div><div class="k due"><b>${tk(dueT)}</b>মোট বাকি</div></div><div class="row"><span>কালেকশনের মধ্যে নগদ ও ডাউন পেমেন্ট</span><b>${tk(cn)}</b></div><div class="row"><span>কালেকশনের মধ্যে কিস্তি ও জমা</span><b>${tk(ci)}</b></div><div class="row"><span>মোট কাস্টমার</span><b>${bnN(D.c.length)} জন</b></div><div class="row"><span>ডিফল্ট কাস্টমার</span><b class="bad">${bnN(defList(CS).length)} জন</b></div>`; };
+const monthRepBlock = () => {
+  const ms = salesMonths(); if (!ms.length) return '';
+  const L = ms.slice(0, 12).reverse(), mx = Math.max(1, ...L.map(x => Math.max(x.st, x.cn + x.ci))), H = 110;
+  const chart = `<div class="k" style="margin:8px 0"><div style="display:flex;gap:4px;align-items:flex-end">` + L.map(x => `<div style="flex:1;min-width:0;text-align:center"><div style="display:flex;gap:2px;align-items:flex-end;justify-content:center;height:${H}px"><i style="width:40%;max-width:12px;height:${Math.round(x.st / mx * H)}px;background:var(--ac);border-radius:3px 3px 0 0"></i><i style="width:40%;max-width:12px;height:${Math.round((x.cn + x.ci) / mx * H)}px;background:var(--ok);opacity:.6;border-radius:3px 3px 0 0"></i></div><small style="font-size:10px">${new Date(x.m + '-01T00:00').toLocaleDateString('bn-BD', { month: 'short' })}</small></div>`).join('') + `</div><small style="display:block;margin-top:6px"><span style="color:var(--ac)">■</span> বিক্রি &nbsp; <span style="color:var(--ok)">■</span> কালেকশন (শেষ ১২ মাস)</small></div>`;
+  const card = (x, i) => { const p = ms[i + 1], col = x.cn + x.ci;
+    return `<div class="k" style="margin:8px 0;text-align:left"><b style="font-size:16px">${ymLabel(x.m)}${x.m == ymOf(today()) ? ' <span class="tag">চলতি মাস</span>' : ''}</b>
+<div class="row"><span>বিক্রি (${bnN(x.sn)} টি)</span><span><b>${tk(x.st)}</b> ${p ? chg(x.st, p.st) : ''}</span></div>
+<div class="row"><span>কালেকশন</span><span><b>${tk(col)}</b> ${p ? chg(col, p.cn + p.ci) : ''}</span></div>
+<div class="row"><span><small>নগদ ও ডাউন পেমেন্ট</small></span><small>${tk(x.cn)}</small></div>
+<div class="row"><span><small>কিস্তি ও জমা</small></span><small>${tk(x.ci)}</small></div></div>`; };
+  const cards = ms.map(card);
+  return `<h2>মাসওয়ারি বিক্রি ও কালেকশন</h2>` + chart + cards.slice(0, 12).join('') + (cards.length > 12 ? `<details><summary class="mut" style="cursor:pointer;padding:8px 0">আরও পুরনো মাস (${bnN(cards.length - 12)} টি)</summary>${cards.slice(12).join('')}</details>` : '');
+};
+/* ---------- লগইন ও নোটিশ দেখার হিসাব ---------- */
+const noteId = n => { const s = (n.t || '') + '|' + (n.x || '') + '|' + (n.img || '').length + '|' + (n.img || '').slice(-24); let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return 'n' + (h >>> 0).toString(36); };
+const fmtAt = ms => new Date(ms).toLocaleString('bn-BD', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+let TLbusy = false, TLfail = 0;
+/* কাস্টমার ঢুকলে (৬ ঘণ্টায় একবার) শেষ লগইন ও সংখ্যা, আর প্রোফাইলে যে নোটিশ দেখল তার আইডি সেভ হয় */
+function trackLogin() {
+  try {
+    if (!me || !isC() || TLbusy || !D.c[0] || !FB || Date.now() - TLfail < 600000) return;
+    const c = D.c[0], K = 'orget_tl_' + c.id, last = +lsGet(K) || 0, gap = Date.now() - last > 6 * 36e5;
+    const ids = (tab == 'me' && !view) ? (NT || []).filter(n => n && n.on !== false && (n.t || n.x || n.img)).map(noteId) : [], have = c.ns || [], add = ids.filter(i => !have.includes(i));
+    if (!gap && !add.length) return;
+    const u = {}; if (gap) { u.ll = Date.now(); u.lc = (+c.lc || 0) + 1; } if (add.length) u.ns = have.concat(add).slice(-30);
+    TLbusy = true;
+    FB.update('customers/' + c.id, u).then(() => { Object.assign(c, u); if (u.ll) { try { localStorage.setItem(K, String(u.ll)); } catch (e) { } } try { saveCC(); } catch (e) { } }).catch(e => { TLfail = Date.now(); console.warn('login-track', e.code || e.message); }).finally(() => { TLbusy = false; });
+  } catch (e) { }
+}
+const loginRows = c => `<div class="row"><span>শেষ লগইন</span><b>${c.ll ? fmtAt(c.ll) : 'এখনো ঢোকেনি'}</b></div><div class="row"><span>মোট লগইন</span><b>${bnN(c.lc || 0)} বার</b></div>`;
+const loginList = () => {
+  const L = D.c.filter(c => c.ll).sort((a, b) => b.ll - a.ll), N = D.c.filter(c => !c.ll).sort((a, b) => a.loan > b.loan ? 1 : -1);
+  const row = c => `<div class="it" data-a="lpOpen" data-id="${c.id}"><div>${esc(c.name)}<br><small>লোন ${esc(c.loan)}</small></div><div style="text-align:right">${c.ll ? `<b>${fmtAt(c.ll)}</b><br><small>${bnN(c.lc || 0)} বার</small>` : '<small class="bad">ঢোকেনি</small>'}</div></div>`;
+  return `<h3>লগইন তালিকা</h3><div class="g"><div class="k"><b>${bnN(L.length)} জন</b>ঢুকেছে</div><div class="k"><b>${bnN(N.length)} জন</b>এখনো ঢোকেনি</div></div><p class="mut">গণনা এই আপডেট থেকে শুরু। আগে যারা ঢুকেছে তারা পরের বার ঢুকলে এখানে আসবে।</p>` + (L.length ? '<h2 style="font-size:16px">ঢুকেছে (সাম্প্রতিক আগে)</h2>' + L.map(row).join('') : '') + (N.length ? '<h2 style="font-size:16px">এখনো ঢোকেনি</h2>' + N.map(row).join('') : '') + '<div class="r"><button class="g2" data-a="x">বন্ধ</button></div>';
+};
+const seenOf = n => { const id = noteId(n), S = D.c.filter(c => (c.ns || []).includes(id)); return { S, N: D.c.filter(c => !(c.ns || []).includes(id)) }; };
 function homeV() {
   const t = today(), dd = D.s.reduce((a, s) => a + due(s), 0), ts = D.s.filter(s => s.date == t).reduce((a, s) => a + s.total, 0), st = isA() ? D.p.reduce((a, p) => a + (p.buy || 0) * p.qty, 0) : 0;
-  const od = []; D.s.forEach(s => (s.inst || []).forEach((i, x) => { if (!i.paid && i.d <= t) od.push({ s, i }); })); od.sort((a, b) => a.i.d < b.i.d ? -1 : 1);
+  const CS = custStats();
   return `<div class="hero"><img class="hl" src="${LOGO}" alt="ORGET"><h2>অরগেট এন্টারপ্রাইজ</h2></div><div class="g"><div class="k due"><b>${tk(dd)}</b>মোট বাকি</div><div class="k"><b>${tk(ts)}</b>আজকের বিক্রি</div>${isA() ? `<div class="k"><b>${tk(st)}</b>স্টকের ক্রয়মূল্য</div>` : ''}<div class="k" data-a="tab" data-id="u"><b>${tk(mp().reduce((a, t) => a + t.a, 0))}</b>${isA() ? 'গ্রহণের অপেক্ষায়' : 'আপনার হাতে, মালিককে দিতে হবে'}</div></div>
-${pdList()}<h2>কিস্তির তাগাদা (${od.length})</h2>${od.map(({ s, i }) => `<div class="it" data-a="openS" data-id="${s.id}"><div>${esc(custName(s))}<br><small class="bad">${dt(i.d)} এর মধ্যে</small></div><div><b>${tk(i.a)}</b></div></div>`).join('') || empty('আজ পর্যন্ত কোনো কিস্তি বকেয়া নেই।')}`; }
+${todayBox(CS)}${secL('তাগাদা', tgList(CS), 'tg', tgRow, LCFG.tg[3])}${secL('কিস্তির ডেট পার হয়েছে', odList(CS), 'od', tgRow, LCFG.od[3])}${secL('ডিফল্ট', defList(CS), 'df', dfRow, LCFG.df[3])}${secL('নতুন কাস্টমার', newList(CS), 'nw', nwRow, LCFG.nw[3])}`; }
 let custSort = 'new', custOff = 'all';
-const custItems = () => D.c.filter(c => (custOff == 'all' || (c.officerId || '') == (custOff == 'none' ? '' : custOff)) && (c.name + (c.phones || [c.phone]).join(' ') + c.loan).toLowerCase().includes(q.toLowerCase())).sort((a, b) => custSort == 'new' ? (b.loan > a.loan ? 1 : -1) : (a.loan > b.loan ? 1 : -1)).map(c => { const d = D.s.filter(s => s.cid == c.id).reduce((a, s) => a + due(s), 0), im = photoOf(c.id); return `<div class="it" data-a="openC" data-id="${c.id}"><div class="pf">${im ? `<img src="${im}" alt="">` : ph0}<div>${esc(c.name)}<br><small>লোন ${esc(c.loan)} · ${esc(c.phone)}${isA() ? ' · ' + esc(offName(c.officerId)) : ''}</small></div></div><div class="${d ? 'bad' : 'ok'}">${d ? 'বাকি ' + tk(d) : 'পরিশোধিত'}</div></div>`; }).join('') || empty('কোনো কাস্টমার নেই। "নতুন কাস্টমার" চাপুন।');
+const custItems = () => { const DS = new Set(defList(custStats()).map(x => x.c.id)); return D.c.filter(c => (custOff == 'all' || (c.officerId || '') == (custOff == 'none' ? '' : custOff)) && (c.name + (c.phones || [c.phone]).join(' ') + c.loan).toLowerCase().includes(q.toLowerCase())).sort((a, b) => custSort == 'new' ? (b.loan > a.loan ? 1 : -1) : (a.loan > b.loan ? 1 : -1)).map(c => { const d = D.s.filter(s => s.cid == c.id).reduce((a, s) => a + due(s), 0), im = photoOf(c.id); return `<div class="it" data-a="openC" data-id="${c.id}"><div class="pf">${im ? `<img src="${im}" alt="">` : ph0}<div>${esc(c.name)}${DS.has(c.id) ? ' ' + DEFTAG : ''}<br><small>লোন ${esc(c.loan)} · ${esc(c.phone)}${isA() ? ' · ' + esc(offName(c.officerId)) : ''}</small></div></div><div class="${d ? 'bad' : 'ok'}">${d ? 'বাকি ' + tk(d) : 'পরিশোধিত'}</div></div>`; }).join('') || empty('কোনো কাস্টমার নেই। "নতুন কাস্টমার" চাপুন।'); };
 const custL = () => `<div class="bar"><input placeholder="নাম, ফোন বা লোন আইডি" value="${esc(q)}" oninput="q=this.value;$('#lst').innerHTML=custItems()"><button data-a="addC">নতুন কাস্টমার</button></div><div class="bar"><button class="g2" data-a="toggleCustSort">${custSort == 'new' ? 'সর্বশেষ একাউন্ট উপরে ✓ (চাপুন: ১ নম্বর উপরে)' : '১ নম্বর একাউন্ট উপরে ✓ (চাপুন: সর্বশেষ উপরে)'}</button></div>${isA() ? `<div class="bar"><select onchange="custOff=this.value;render()"><option value="all">সব অফিসার</option><option value="none" ${custOff == 'none' ? 'selected' : ''}>অনির্ধারিত</option>${officers().map(o => `<option value="${o.id}" ${custOff == o.id ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select></div><div class="bar"><button class="g2" data-a="addOld">পুরনো একাউন্ট যোগ (১০০০০১–১০০১৪৫)</button></div><p class="mut">পুরনো একাউন্ট যোগ হয়েছে: ${D.c.filter(c => +c.loan <= 100145).length}/১৪৫</p>` : ''}<div id="lst">${custItems()}</div>`;
 function custV(id) {
   const c = D.c.find(x => x.id == id); if (!c) return empty('লোড হচ্ছে…');
@@ -484,11 +588,11 @@ function custV(id) {
   const tot = ss.reduce((a, x) => a + x.total, 0), pdd = ss.reduce((a, x) => a + paid(x), 0), pays = ss.flatMap(items).sort((a, b) => (b.d || '') > (a.d || '') ? 1 : -1);
   const fig = d => `<figure data-a="doc" data-id="${d.id}">${thumb(d.img)}<figcaption>${esc(d.n)}</figcaption></figure>`;
   return `${isC() ? '' : `<div class="bar"><button class="g2" data-a="tab" data-id="c">← পিছনে</button></div>`}
-<div class="hero">${pimg ? `<img class="ph" src="${pimg}" alt="" ${pic ? `data-a="doc" data-id="${pic.id}"` : ''}>` : '<div class="ph" style="display:flex;align-items:center;justify-content:center;background:var(--ac2);color:var(--ac);font-size:12px">ছবি নেই</div>'}<h2>${esc(c.name)}</h2><small class="mut">লোন আইডি ${esc(c.loan)}${canAct() ? ' · অফিসার: ' + esc(offName(c.officerId)) : ''}</small><div>${ph.map(x => `<a href="tel:${esc(x)}">${esc(x)}</a>`).join(' · ')} ${isA() ? `<button class="g2" data-a="newPh" data-id="${id}">+ নম্বর</button>` : ''}</div>
+<div class="hero">${pimg ? `<img class="ph" src="${pimg}" alt="" ${pic ? `data-a="doc" data-id="${pic.id}"` : ''}>` : '<div class="ph" style="display:flex;align-items:center;justify-content:center;background:var(--ac2);color:var(--ac);font-size:12px">ছবি নেই</div>'}<h2>${esc(c.name)}</h2>${canAct() && defList(custStats()).some(x => x.c.id == c.id) ? '<div>' + DEFTAG + '</div>' : ''}<small class="mut">লোন আইডি ${esc(c.loan)}${canAct() ? ' · অফিসার: ' + esc(offName(c.officerId)) : ''}</small><div>${ph.map(x => `<a href="tel:${esc(x)}">${esc(x)}</a>`).join(' · ')} ${isA() ? `<button class="g2" data-a="newPh" data-id="${id}">+ নম্বর</button>` : ''}</div>
 ${canAct() ? `<div class="bar" style="justify-content:center"><button data-a="goSale" data-id="${id}">বিক্রি করুন</button><button data-a="collectFor" data-id="${id}">কিস্তি আদায়</button></div><div class="bar" style="justify-content:center"><button class="g2" data-a="setPin" data-id="${id}">কাস্টমারের লগইন পিন দিন / বদলান</button></div>` : ''}
 ${isA() ? `<div class="bar" style="justify-content:center"><button class="g2" data-a="setPhoto" data-id="${id}">${pic ? 'ছবি বদলান' : 'ছবি যোগ করুন'}</button><button class="g2" data-a="editProf" data-id="${id}">প্রোফাইল সম্পাদনা</button></div><div class="bar" style="justify-content:center"><button class="g2" data-a="moveOne" data-id="${id}">অন্য অফিসারকে দিন</button></div>` : ''}</div>
 ${isC() ? noticeBox() + noteBtn() + kistiPanel(c, ss) : ''}<h2>লেনদেন</h2><div class="g"><div class="k"><b>${tk(tot)}</b>মোট কেনা</div><div class="k"><b>${tk(pdd)}</b>গৃহীত জমা</div><div class="k due"><b>${tk(tot - pdd)}</b>বাকি</div></div>
-${pdRows(c)}
+${canAct() ? loginRows(c) : ''}${pdRows(c)}
 <div class="row"><span>কর্মস্থল</span><span>${esc(c.wp || '—')}${isA() ? `<button class="g2" data-a="setWp" data-id="${id}">বদলান</button>` : ''}</span></div>
 <h2>কী কী কিনেছে</h2>${ss.map(saleItemP).join('') || empty('এখনো কিছু কেনেনি।')}
 ${monthlyRecs(c)}
@@ -657,7 +761,7 @@ let rd = today();
 const colL = () => { const all = D.s.flatMap(items), sum = a => a.reduce((x, t) => x + t.a, 0), in_ = n => all.filter(t => (t.d || '').slice(0, n) == rd.slice(0, n));
   const by = a => { const m = {}; a.forEach(t => { const n = t.bn || 'মালিক'; m[n] = (m[n] || 0) + t.a; }); return Object.entries(m).map(([n, v]) => `<div class="row"><span>${esc(n)}</span><b>${tk(v)}</b></div>`).join('') || empty('কোনো কালেকশন নেই।'); };
   const blk = (t, a) => `<h2>${t}</h2><div class="g"><div class="k"><b>${tk(sum(a))}</b>মোট আদায়</div><div class="k"><b>${tk(sum(a.filter(ok)))}</b>মালিক গ্রহণ করেছেন</div></div>${by(a)}`;
-  return `<label>তারিখ বেছে নিন<input type="date" value="${rd}" onchange="rd=this.value||today();render()"></label>` + blk('দৈনিক কালেকশন', in_(10)) + (isA() ? blk('মাসিক কালেকশন', in_(7)) + blk('বার্ষিক কালেকশন', in_(4)) : '') + (canAct() ? tgtBlock() : ''); };
+  return (isA() ? lifeBlock() + monthRepBlock() : '') + `<label>তারিখ বেছে নিন<input type="date" value="${rd}" onchange="rd=this.value||today();render()"></label>` + blk('দৈনিক কালেকশন', in_(10)) + (isA() ? blk('মাসিক কালেকশন', in_(7)) + blk('বার্ষিক কালেকশন', in_(4)) : '') + (canAct() ? tgtBlock() + dateTgBlock() + defBlock() : ''); };
 
 /* ---------- গ্যারেজ ---------- */
 let gTab = 'daily', gDate = today(), gMonth = today().slice(0, 7), gEditing = new Set();
@@ -705,7 +809,8 @@ function render() {
   $('#who').innerHTML = ''; $('#mnb').hidden = false;
   { const dueB = isA() && !(BK && BK.last && (new Date() - new Date(BK.last + 'T00:00')) / 864e5 < 8); $('#mnb').textContent = dueB ? '⋮ 🔴' : '⋮'; }
   const want = (view && view.t == 'c') ? view.id : (isC() && tab == 'me' ? me.cid : null); if (want !== loadedFor && canViewDocs()) loadDocs(want);
-  $('#m').innerHTML = view ? (view.t == 'c' ? custV(view.id) : view.t == 'dr' ? driverV(view.id) : view.t == 'p' ? prodV(view.id) : saleV(view.id)) : ({ home: () => isC() ? shopHome() : homeV(), c: custL, p: prodL, s: saleL, u: offL, r: colL, g: () => FEAT.garage ? garageL() : empty('গ্যারেজ পাতা এখন বন্ধ আছে।'), me: () => custV(me.cid), news: newsV })[tab]();
+  $('#m').innerHTML = view ? (view.t == 'L' ? listV(view.k) : view.t == 'c' ? custV(view.id) : view.t == 'dr' ? driverV(view.id) : view.t == 'p' ? prodV(view.id) : saleV(view.id)) : ({ home: () => isC() ? shopHome() : homeV(), c: custL, p: prodL, s: saleL, u: offL, r: colL, g: () => FEAT.garage ? garageL() : empty('গ্যারেজ পাতা এখন বন্ধ আছে।'), me: () => custV(me.cid), news: newsV })[tab]();
+  if (isC()) trackLogin();
   if (tab == 's' && !view) { const sf = document.getElementById('sf'); if (sf) sf.onsubmit = e => { e.preventDefault(); A.doSale(sf); }; } }
 const canViewDocs = () => isA() || isO() || isC();
 
@@ -744,9 +849,13 @@ const A = {
     const d = $('#dlg');
     if (!NTO || load === true) { d.innerHTML = '<h3>নোটিশ</h3><p class="mut">লোড হচ্ছে…</p>'; if (!d.open) d.showModal(); try { const r = await FB.get('meta/notice'); NTO = (r.exists && r.data.items) || []; } catch (e) { alert('নোটিশ আনা যায়নি: ' + (e.code || e.message)); NTO = null; A.x(); return; } }
     while (NTO.length < 5) NTO.push({ t: '', x: '', img: '', on: true });
-    d.innerHTML = '<h3>নোটিশ</h3><p class="mut">কাস্টমারের প্রোফাইলে ছবি ও পরিচয়ের নিচে ৫ সেকেন্ড পরপর বদলে দেখাবে। সব ঘর খালি বা বন্ধ থাকলে কিছুই দেখাবে না।</p>' + NTO.slice(0, 5).map((n, i) => `<div class="it"><div style="display:flex;gap:10px;align-items:center">${n.img ? `<img src="${n.img}" style="width:64px;height:36px;object-fit:cover;border-radius:6px" alt="">` : ''}<div>${n.t || n.x || n.img ? esc(n.t || n.x.slice(0, 30) || 'ছবি') : 'খালি ঘর'}<br><small>${n.t || n.x || n.img ? (n.on === false ? 'বন্ধ' : 'চালু') : ''}</small></div></div><div><button class="g2" data-a="ntEdit" data-id="${i}">${n.t || n.x || n.img ? 'সম্পাদনা' : 'যোগ করুন'}</button>${n.t || n.x || n.img ? `<button class="g2" data-a="ntDel" data-id="${i}">মুছুন</button>` : ''}</div></div>`).join('') + '<div class="r"><button class="g2" data-a="x">বন্ধ</button></div>';
+    d.innerHTML = '<h3>নোটিশ</h3><p class="mut">কাস্টমারের প্রোফাইলে ছবি ও পরিচয়ের নিচে ৫ সেকেন্ড পরপর বদলে দেখাবে। সব ঘর খালি বা বন্ধ থাকলে কিছুই দেখাবে না।</p>' + NTO.slice(0, 5).map((n, i) => `<div class="it"><div style="display:flex;gap:10px;align-items:center">${n.img ? `<img src="${n.img}" style="width:64px;height:36px;object-fit:cover;border-radius:6px" alt="">` : ''}<div>${n.t || n.x || n.img ? esc(n.t || n.x.slice(0, 30) || 'ছবি') : 'খালি ঘর'}<br><small>${n.t || n.x || n.img ? (n.on === false ? 'বন্ধ' : 'চালু') + ' · 👁 ' + bnN(seenOf(n).S.length) + '/' + bnN(D.c.length) + ' জন দেখেছে' : ''}</small></div></div><div>${n.t || n.x || n.img ? `<button class="g2" data-a="ntSeen" data-id="${i}">কে দেখল</button>` : ''}<button class="g2" data-a="ntEdit" data-id="${i}">${n.t || n.x || n.img ? 'সম্পাদনা' : 'যোগ করুন'}</button>${n.t || n.x || n.img ? `<button class="g2" data-a="ntDel" data-id="${i}">মুছুন</button>` : ''}</div></div>`).join('') + '<div class="r"><button class="g2" data-a="x">বন্ধ</button></div>';
     if (!d.open) d.showModal();
   },
+  loginPanel: () => { const d = $('#dlg'); d.innerHTML = loginList(); if (!d.open) d.showModal(); },
+  lpOpen: id => { A.x(); A.openC(id); },
+  ntSeen: i => { const n = (NTO || [])[+i]; if (!n) return; const z = seenOf(n), nm = c => `<div class="row"><span>${esc(c.name)}</span><small>লোন ${esc(c.loan)}</small></div>`, d = $('#dlg');
+    d.innerHTML = `<h3>${esc(n.t || (n.x || '').slice(0, 30) || 'নোটিশ')}</h3><div class="g"><div class="k"><b>${bnN(z.S.length)} জন</b>দেখেছে</div><div class="k"><b>${bnN(z.N.length)} জন</b>দেখেনি</div></div><p class="mut">কাস্টমার প্রোফাইল খুললে নোটিশ দেখা ধরা হয়। লেখা বা ছবি বদলালে গণনা নতুন করে শুরু হয়।</p>` + (z.S.length ? '<h2 style="font-size:16px">দেখেছে</h2>' + z.S.map(nm).join('') : '') + (z.N.length ? '<h2 style="font-size:16px">দেখেনি</h2>' + z.N.map(nm).join('') : '') + '<div class="r"><button class="g2" data-a="noticePanel">← পিছনে</button></div>'; },
   ntSave: async () => { const items = NTO.slice(0, 5); if (JSON.stringify(items).length > 900000) { alert('ছবি বেশি বড় হয়ে গেছে। কিছু নোটিশের ছবি বদলে ছোট ছবি দিন।'); return false; } await FB.set('meta/notice', { items, v: Date.now() }); },
   ntEdit: i => { i = +i; const n = NTO[i] || { t: '', x: '', img: '', on: true };
     form('নোটিশ ' + (i + 1), (n.img ? `<img src="${n.img}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:10px" alt="">` : '') + F('t', 'শিরোনাম (এক লাইন)', 'text', n.t || '', 'maxlength="80"') + `<label>লেখা (সর্বোচ্চ ৩০০ অক্ষর)<textarea name="x" rows="5" maxlength="300">${esc(n.x || '')}</textarea></label>` + FI('img', n.img ? 'ছবি বদলাতে চাইলে নতুন ছবি দিন' : 'ছবি (ঐচ্ছিক, আড়াআড়ি ছবি ভালো)', false) + S('on', 'অবস্থা', `<option value="1" ${n.on !== false ? 'selected' : ''}>চালু</option><option value="0" ${n.on === false ? 'selected' : ''}>বন্ধ</option>`),
@@ -757,6 +866,9 @@ const A = {
   x: () => $('#dlg').close(),
   tab: id => { tab = id; view = null; q = ''; render(); scrollTo(0, 0); },
   back: () => { view = null; render(); scrollTo(0, 0); },
+  moreL: id => { view = { t: 'L', k: id }; render(); scrollTo(0, 0); },
+  goRep: () => { rd = today(); tab = 'r'; view = null; render(); scrollTo(0, 0); },
+  setRd: id => { rd = id; render(); },
   openC: id => { view = { t: 'c', id }; render(); scrollTo(0, 0); }, openS: id => { view = { t: 's', id }; render(); scrollTo(0, 0); },
   logout: async () => { try { Object.keys(localStorage).filter(k => k.startsWith(CC_KEY)).forEach(k => localStorage.removeItem(k)); } catch (e) { } stop(); try { await FB.signOut(); } catch (e) { } location.reload(); },
 
@@ -770,7 +882,7 @@ const A = {
     let im, th = ''; try { im = await Promise.all(L.map(([k, n]) => r[k] && r[k].size ? fileData(r[k]).then(img => ({ n, img })) : null)); th = await fileData(r.photo, 96, .5); } catch (e) { alert('ছবি পড়া যায়নি। অন্য ছবি দিন।'); return false; }
     if (!im[0] || !im[1] || !im[2]) { alert('কাস্টমারের ছবি এবং ভোটার কার্ডের দুই পাশের ছবি লাগবেই'); return false; }
     const off = isA() ? (r.off || '') : me.sid;
-    const c = { id: uid(), name: r.name, phone: ph[0], phones: ph, address: r.address, wp: r.wp || '', pd: '', pday: pdayOf(r.pday), tgt: Math.max(0, Math.round(+r.tgt || 0)), tgh: (+r.tgt > 0 ? [{ from: ymOf(today()), amt: Math.round(+r.tgt), at: today(), by: me.name }] : []), tl: (r.ta || r.ln || r.lp) ? [{ a: r.ta || '', ln: r.ln || '', lp: r.lp || '', d: today() }] : [], nid: r.nid, gn: r.gn, gp: r.gp, gi: r.gi, nn: r.nn, nr: r.nr, np: r.np, officerId: off, th };
+    const c = { id: uid(), name: r.name, phone: ph[0], phones: ph, address: r.address, wp: r.wp || '', at: Date.now(), pd: '', pday: pdayOf(r.pday), tgt: Math.max(0, Math.round(+r.tgt || 0)), tgh: (+r.tgt > 0 ? [{ from: ymOf(today()), amt: Math.round(+r.tgt), at: today(), by: me.name }] : []), tl: (r.ta || r.ln || r.lp) ? [{ a: r.ta || '', ln: r.ln || '', lp: r.lp || '', d: today() }] : [], nid: r.nid, gn: r.gn, gp: r.gp, gi: r.gi, nn: r.nn, nr: r.nr, np: r.np, officerId: off, th };
     try {
       c.loan = await FB.tx(async t => {
         if ((await t.get('nids/' + nid)).exists) throw { dup: 1 };
@@ -877,7 +989,7 @@ const A = {
     const ex = D.c.find(x => x.loan == lid); if (ex) { alert('এই আইডি আগেই ব্যবহার হয়েছে: ' + ex.name); return false; }
     if (nid.length < 5 || D.c.some(x => nidN(x.nid) == nid)) { alert('ভোটার কার্ড নম্বর ভুল, অথবা এই কার্ডে আগেই একাউন্ট আছে'); return false; }
     const total = +r.total, cash = r.type == 'c', down = cash ? 0 : Math.min(+r.down || 0, total), off = r.off || '';
-    const c = { id: uid(), name: r.name, phone: r.phone, phones: [r.phone], address: r.address, wp: r.wp || '', pd: '', pday: pdayOf(r.pday), tgt: Math.max(0, Math.round(+r.tgt || 0)), tgh: (+r.tgt > 0 ? [{ from: ymOf(today()), amt: Math.round(+r.tgt), at: today(), by: me.name }] : []), tl: [], nid: r.nid, loan: lid, lg: 1, officerId: off };
+    const c = { id: uid(), name: r.name, phone: r.phone, phones: [r.phone], address: r.address, wp: r.wp || '', at: Date.now(), pd: '', pday: pdayOf(r.pday), tgt: Math.max(0, Math.round(+r.tgt || 0)), tgh: (+r.tgt > 0 ? [{ from: ymOf(today()), amt: Math.round(+r.tgt), at: today(), by: me.name }] : []), tl: [], nid: r.nid, loan: lid, lg: 1, officerId: off };
     const sl = { id: uid(), by: 'owner', bn: me.name, own: true, ts: new Date(r.sd + 'T00:00').getTime(), cid: c.id, items: [{ pid: '', pn: r.pn, qty: 1, price: total }], total, type: cash ? 'c' : 'i', down, date: r.sd, inst: [], payments: [], officerId: off, lg: 1 };
     const pdn = cash ? 0 : Math.max(0, Math.min(+r.paidn || 0, total - down)); if (pdn > 0) sl.payments.push({ id: uid(), amt: pdn, date: r.sd, by: 'owner', bn: me.name, own: true });
     await FB.batch([{ t: 'set', p: 'customers/' + c.id, d: c }, { t: 'set', p: 'nids/' + nid, d: { cid: c.id } }, { t: 'set', p: 'loginIndex/' + lid, d: { v: 1, role: 'customer', cid: c.id } }, { t: 'set', p: 'sales/' + sl.id, d: sl }]);
@@ -928,7 +1040,7 @@ const A = {
     d.innerHTML = `<h3>${esc(me.name)} <span class="tag">${RL[me.role]}</span></h3>`
       + (isC() ? it('mRef', 'রিফ্রেশ', 'নতুন কিস্তি ও খবর আনুন') : it('mRef', 'আপডেট', 'সার্ভার থেকে নতুন ডাটা আনুন'))
       + (isA() ? it('noticePanel', 'নোটিশ', 'কাস্টমারের প্রোফাইলে ছবি ও লেখা (৫টি পর্যন্ত)') + it('staffPanel', 'স্টাফ ও লগইন', 'অফিসার ও গ্যারেজ এডিটর যোগ, পাসওয়ার্ড বদল, অ্যাক্সেস বন্ধ') + it('transferPanel', 'কাস্টমার ট্রান্সফার', 'এক অফিসারের সব কাস্টমার আরেক অফিসারকে দিন') + it('bkPanel', 'ব্যাকআপ সিস্টেম', 'ডাটা সংরক্ষণ ও ফেরত বসানো') : '')
-      + it('mOut', 'বের হন', '') + '<div class="r"><button class="g2" data-a="x">বন্ধ</button></div>'; d.showModal(); },
+      + (canAct() ? it('loginPanel', 'লগইন তালিকা', 'কোন কাস্টমার কখন ও কতবার ঢুকেছে') : '') + it('mOut', 'বের হন', '') + '<div class="r"><button class="g2" data-a="x">বন্ধ</button></div>'; d.showModal(); },
   staffPanel: () => { const d = $('#dlg'); d.innerHTML = `<h3>স্টাফ ও লগইন</h3><div class="bar"><button data-a="addStaff">নতুন স্টাফ যোগ করুন</button></div>` + (STAFF.length ? STAFF.map(s => `<div class="it" style="cursor:default"><div>${esc(s.name)} <span class="tag">${RL[s.role]}</span><br><small>আইডি: ${esc(s.loginId)}${s.active === false ? ' · <span class="bad">অ্যাক্সেস বন্ধ</span>' : ''}</small></div><div><button class="g2" data-a="resetStaff" data-id="${s.id}">${s.active === false ? 'চালু করুন' : 'পাসওয়ার্ড বদলান'}</button>${s.active === false ? '' : `<br><button class="g2" style="margin-top:4px" data-a="blockStaff" data-id="${s.id}">অ্যাক্সেস বন্ধ</button>`}</div></div>`).join('') : '<p class="mut">কোনো স্টাফ নেই।</p>') + `<div class="r"><button class="g2" data-a="menu">← পিছনে</button><button class="g2" data-a="x">বন্ধ</button></div>`; d.showModal(); },
   addStaff: () => form('নতুন স্টাফ', F('name', 'নাম', 'text', '', 'required') + S('role', 'ভূমিকা', '<option value="officer">অফিসার</option><option value="garage">গ্যারেজ এডিটর</option>') + F('lid', 'লগইন আইডি (ইংরেজি ছোট অক্ষর/সংখ্যা, অক্ষর দিয়ে শুরু, যেমন: rahim)', 'text', '', 'required pattern="[a-z][a-z0-9_.]{2,19}" autocapitalize="none"') + F('pw', 'পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)', 'text', '', 'required minlength="6"'), async r => {
     const id = normId(r.lid); if (!/^[a-z][a-z0-9_.]{2,19}$/.test(id)) { alert('আইডি ইংরেজি ছোট অক্ষরে, অক্ষর দিয়ে শুরু, ৩–২০ ঘর'); return false; }
